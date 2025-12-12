@@ -1,0 +1,47 @@
+package auth
+
+import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+
+	clog "go-forward-proxy/pkg/dumbproxy/log"
+)
+
+type Auth interface {
+	Validate(ctx context.Context, wr http.ResponseWriter, req *http.Request) (string, bool)
+	io.Closer
+}
+
+func NewAuth(paramstr string, logger *clog.CondLogger) (Auth, error) {
+	url, err := url.Parse(paramstr)
+	if err != nil {
+		return nil, err
+	}
+
+	switch strings.ToLower(url.Scheme) {
+	case "static":
+		return NewStaticAuth(url, logger)
+	case "basicfile":
+		return NewBasicFileAuth(url, logger)
+	case "hmac":
+		return NewHMACAuth(url, logger)
+	case "cert":
+		return NewCertAuth(url, logger)
+	case "redis":
+		return NewRedisAuth(url, false, logger)
+	case "redis-cluster":
+		return NewRedisAuth(url, true, logger)
+	case "none":
+		return NoAuth{}, nil
+	case "reject-http", "reject-https":
+		return NewRejectHTTPAuth(url, logger)
+	case "reject-static":
+		return NewStaticRejectAuth(url, logger)
+	default:
+		return nil, errors.New("Unknown auth scheme")
+	}
+}

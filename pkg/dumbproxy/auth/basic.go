@@ -1,0 +1,185 @@
+package auth
+
+import (
+	"context"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/tg123/go-htpasswd"
+
+	clog "go-forward-proxy/pkg/dumbproxy/log"
+)
+
+type pwFile struct {
+	file    *htpasswd.File
+	modTime time.Time
+}
+type BasicAuth struct {
+	pw           atomic.Pointer[pwFile]
+	pwFilename   string
+	logger       *clog.CondLogger
+	hiddenDomain string
+	stopOnce     sync.Once
+	stopChan     chan struct{}
+	next         Auth
+}
+
+func NewBasicFileAuth(param_url *url.URL, logger *clog.CondLogger) (*BasicAuth, error) {
+	values, err := url.ParseQuery(param_url.RawQuery)
+	if err != nil {
+		return nil, err
+	}
+	filename := values.Get("path")
+	if filename == "" {
+		return nil, errors.New("\"path\" parameter is missing from auth config URI")
+	}
+
+	auth := &BasicAuth{
+		hiddenDomain: strings.ToLower(values.Get("hidden_domain")),
+		pwFilename:   filename,
+		logger:       logger,
+		stopChan:     make(chan struct{}),
+	}
+
+	if err := auth.reload(); err != nil {
+		return nil, fmt.Errorf("unable to load initial password list: %w", err)
+	}
+
+	reloadInterval := 15 * time.Second
+	if reloadIntervalOption := values.Get("reload"); reloadIntervalOption != "" {
+		parsedInterval, err := time.ParseDuration(reloadIntervalOption)
+		if err != nil {
+			logger.Warning("unable to parse reload interval: %v. using default value.", err)
+		}
+		reloadInterval = parsedInterval
+	}
+	if reloadInterval > 0 {
+		go auth.reloadLoop(reloadInterval)
+	}
+
+	if nextAuth := values.Get("else"); nextAuth != "" {
+		nap, err := NewAuth(nextAuth, logger)
+		if err != nil {
+			return nil, fmt.Errorf("chained auth provider construction failed: %w", err)
+		}
+		auth.next = nap
+	}
+
+	return auth, nil
+}
+
+func (auth *BasicAuth) reload() error {
+	var oldModTime time.Time
+	if oldPw := auth.pw.Load(); oldPw != nil {
+		oldModTime = oldPw.modTime
+	}
+
+	f, modTime, err := openIfModified(auth.pwFilename, oldModTime)
+	if err != nil {
+		return err
+	}
+	if f == nil {
+		// no changes since last modTime
+		return nil
+	}
+
+	auth.logger.Info("reloading password file from %q...", auth.pwFilename)
+	newPwFile, err := htpasswd.NewFromReader(f, htpasswd.DefaultSystems, func(parseErr error) {
+		auth.logger.Error("failed to parse line in %q: %v", auth.pwFilename, parseErr)
+	})
+	if err != nil {
+		return err
+	}
+
+	newPw := &pwFile{
+		file:    newPwFile,
+		modTime: modTime,
+	}
+	auth.pw.Store(newPw)
+	auth.logger.Info("password file reloaded.")
+
+	return nil
+}
+
+func (auth *BasicAuth) reloadLoop(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-auth.stopChan:
+			return
+		case <-ticker.C:
+			if err := auth.reload(); err != nil {
+				auth.logger.Error("reload failed: %v", err)
+			}
+		}
+	}
+}
+
+func (auth *BasicAuth) Valid(user, password, userAddr string) bool {
+	pwFile := auth.pw.Load().file
+	return pwFile.Match(user, password) || tryValid(auth.next, auth.logger, user, password, userAddr)
+}
+
+func (auth *BasicAuth) Validate(ctx context.Context, wr http.ResponseWriter, req *http.Request) (string, bool) {
+	hdr := req.Header.Get("Proxy-Authorization")
+	if hdr == "" {
+		return requireBasicAuth(ctx, wr, req, auth.hiddenDomain, auth.next)
+	}
+	hdr_parts := strings.SplitN(hdr, " ", 2)
+	if len(hdr_parts) != 2 || strings.ToLower(hdr_parts[0]) != "basic" {
+		return requireBasicAuth(ctx, wr, req, auth.hiddenDomain, auth.next)
+	}
+
+	token := hdr_parts[1]
+	data, err := base64.StdEncoding.DecodeString(token)
+	if err != nil {
+		return requireBasicAuth(ctx, wr, req, auth.hiddenDomain, auth.next)
+	}
+
+	pair := strings.SplitN(string(data), ":", 2)
+	if len(pair) != 2 {
+		return requireBasicAuth(ctx, wr, req, auth.hiddenDomain, auth.next)
+	}
+
+	login := pair[0]
+	password := pair[1]
+
+	pwFile := auth.pw.Load().file
+
+	if pwFile.Match(login, password) {
+		if auth.hiddenDomain != "" &&
+			(req.Host == auth.hiddenDomain || req.URL.Host == auth.hiddenDomain) {
+			wr.Header().Set("Content-Length", strconv.Itoa(len([]byte(AUTH_TRIGGERED_MSG))))
+			wr.Header().Set("Pragma", "no-cache")
+			wr.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+			wr.Header().Set("Expires", EPOCH_EXPIRE)
+			wr.Header()["Date"] = nil
+			wr.WriteHeader(http.StatusOK)
+			wr.Write([]byte(AUTH_TRIGGERED_MSG))
+			return "", false
+		} else {
+			return login, true
+		}
+	}
+	return requireBasicAuth(ctx, wr, req, auth.hiddenDomain, auth.next)
+}
+
+func (auth *BasicAuth) Close() error {
+	var err error
+	auth.stopOnce.Do(func() {
+		if auth.next != nil {
+			err = auth.next.Close()
+		}
+		close(auth.stopChan)
+	})
+	return err
+}

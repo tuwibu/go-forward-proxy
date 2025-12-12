@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(cat:*)",
+      "Bash(find:*)",
+      "Bash(if not exist pkg mkdir pkg)",
+      "Bash(robocopy:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(go mod tidy:*)",
+      "Bash(xargs:*)",
+      "Bash(go build:*)",
+      "Bash(go get:*)",
+      "Bash(./bin/server.exe:*)",
+      "Bash(go mod edit:*)",
+      "Bash(sqlite3:*)",
+      "Bash(go vet:*)",
+      "Bash(taskkill:*)",
+      "Bash(timeout 2 powershell:*)",
+      "Bash(curl:*)"
+    ]
+  }
+}
