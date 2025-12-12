@@ -17,7 +17,8 @@
       "Bash(go vet:*)",
       "Bash(taskkill:*)",
       "Bash(timeout 2 powershell:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(timeout:*)"
     ]
   }
 }

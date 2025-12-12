@@ -89,12 +89,13 @@ func (s *TMProxyService) GetCurrentProxy(apiKey string) (*ProxyInfo, error) {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	if tmResp.Code != 200 {
-		return nil, fmt.Errorf("tmproxy API error: %s", tmResp.Message)
+	// Check for API error (code != 0 means error)
+	if tmResp.Code != 0 {
+		return nil, fmt.Errorf("tmproxy API error: code=%d, message=%s", tmResp.Code, tmResp.Message)
 	}
 
-	// Parse expired_at timestamp
-	expiresAt, err := time.Parse(time.RFC3339, tmResp.Data.ExpiredAt)
+	// Parse expired_at timestamp (format: "HH:MM:SS MM/DD/YYYY")
+	expiresAt, err := time.Parse("15:04:05 01/02/2006", tmResp.Data.ExpiredAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse expired_at: %w", err)
 	}
@@ -147,8 +148,9 @@ func (s *TMProxyService) GetNewProxy(apiKey string) (*ProxyInfo, error) {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	if tmResp.Code != 200 {
-		return nil, fmt.Errorf("tmproxy API error: %s", tmResp.Message)
+	// Check for API error (code != 0 means error)
+	if tmResp.Code != 0 {
+		return nil, fmt.Errorf("tmproxy API error: code=%d, message=%s", tmResp.Code, tmResp.Message)
 	}
 
 	// Format proxy string: "ip:port:username:password"
