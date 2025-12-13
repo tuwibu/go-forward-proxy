@@ -3,6 +3,7 @@ package proxymanager
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -58,16 +59,31 @@ func (m *Manager) UpsertProxy(apiKey, serviceType string, minTimeReset int) (*mo
 
 // insertNewProxy handles the INSERT flow when proxy doesn't exist
 func (m *Manager) insertNewProxy(apiKey, serviceType string, minTimeReset int, service proxyservices.ProxyService) (*models.Proxy, error) {
-	// Get current proxy info from service (NOT GetNewProxy)
+	// Get current proxy info from service
 	proxyInfo, err := service.GetCurrentProxy(apiKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get current proxy: %w", err)
-	}
-
-	// Calculate last_reset_at based on NextResetAfter
-	// This ensures auto-reset will run at the right time
 	now := time.Now()
-	lastResetAt := now.Add(-time.Duration(proxyInfo.NextResetAfter) * time.Second)
+	var lastResetAt time.Time
+
+	if err != nil {
+		fmt.Println("Failed to get current proxy: %w", err)
+		// If GetCurrentProxy returns ErrNoCurrentProxy (code=27), call GetNewProxy to request a new proxy
+		if err.Error() == "no current proxy available, need to call GetNewProxy" || errors.Is(err, proxyservices.ErrNoCurrentProxy) {
+			fmt.Println("No current proxy available, calling GetNewProxy")
+			proxyInfo, err = service.GetNewProxy(apiKey)
+			if err != nil {
+				fmt.Println("Failed to get new proxy: %w", err)
+				return nil, fmt.Errorf("failed to get new proxy: %w", err)
+			}
+			// When GetNewProxy is called, lastResetAt is the current time
+			lastResetAt = now
+		} else {
+			return nil, fmt.Errorf("failed to get current proxy: %w", err)
+		}
+	} else {
+		// GetCurrentProxy succeeded, calculate last_reset_at based on NextResetAfter
+		// This ensures auto-reset will run at the right time
+		lastResetAt = now.Add(-time.Duration(proxyInfo.NextResetAfter) * time.Second)
+	}
 
 	// Insert into database with calculated last_reset_at
 	result, err := m.db.Exec(`
@@ -118,13 +134,25 @@ func (m *Manager) insertNewProxy(apiKey, serviceType string, minTimeReset int, s
 func (m *Manager) updateExistingProxy(proxyID uint, apiKey string, minTimeReset int, service proxyservices.ProxyService) (*models.Proxy, error) {
 	// Get current proxy info from service
 	proxyInfo, err := service.GetCurrentProxy(apiKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get current proxy: %w", err)
-	}
-
-	// Calculate last_reset_at based on NextResetAfter
 	now := time.Now()
-	lastResetAt := now.Add(-time.Duration(proxyInfo.NextResetAfter) * time.Second)
+	var lastResetAt time.Time
+
+	if err != nil {
+		// If GetCurrentProxy returns ErrNoCurrentProxy (code=27), call GetNewProxy to request a new proxy
+		if err.Error() == "no current proxy available, need to call GetNewProxy" || errors.Is(err, proxyservices.ErrNoCurrentProxy) {
+			proxyInfo, err = service.GetNewProxy(apiKey)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get new proxy: %w", err)
+			}
+			// When GetNewProxy is called, lastResetAt is the current time
+			lastResetAt = now
+		} else {
+			return nil, fmt.Errorf("failed to get current proxy: %w", err)
+		}
+	} else {
+		// GetCurrentProxy succeeded, calculate last_reset_at based on NextResetAfter
+		lastResetAt = now.Add(-time.Duration(proxyInfo.NextResetAfter) * time.Second)
+	}
 
 	// Update database: proxy_str, min_time_reset, last_reset_at
 	_, err = m.db.Exec(`

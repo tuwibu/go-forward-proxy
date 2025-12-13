@@ -18,7 +18,10 @@
       "Bash(taskkill:*)",
       "Bash(timeout 2 powershell:*)",
       "Bash(curl:*)",
-      "Bash(timeout:*)"
+      "Bash(timeout:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(git log:*)"
     ]
   }
 }

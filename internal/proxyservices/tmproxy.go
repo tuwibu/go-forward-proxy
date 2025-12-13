@@ -3,6 +3,7 @@ package proxyservices
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -11,6 +12,10 @@ import (
 const (
 	tmproxyGetNewURL     = "https://tmproxy.com/api/proxy/get-new-proxy"
 	tmproxyGetCurrentURL = "https://tmproxy.com/api/proxy/get-current-proxy"
+)
+
+var (
+	ErrNoCurrentProxy = errors.New("no current proxy available, need to call GetNewProxy")  // Exported (starts with uppercase)
 )
 
 type TMProxyService struct {
@@ -39,10 +44,12 @@ type tmproxyNewProxyResponse struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 	Data    struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-		HTTPS    string `json:"https"` // Format: "ip:port"
-		SOCKS5   string `json:"socks5"` // Format: "ip:port"
+		Username    string `json:"username"`
+		Password    string `json:"password"`
+		HTTPS       string `json:"https"`        // Format: "ip:port"
+		SOCKS5      string `json:"socks5"`      // Format: "ip:port"
+		NextRequest int    `json:"next_request"` // Seconds
+		ExpiredAt   string `json:"expired_at"`   // Format: "HH:MM:SS MM/DD/YYYY"
 	} `json:"data"`
 }
 
@@ -91,11 +98,15 @@ func (s *TMProxyService) GetCurrentProxy(apiKey string) (*ProxyInfo, error) {
 
 	// Check for API error (code != 0 means error)
 	if tmResp.Code != 0 {
+		// Special handling for code=27 (no current proxy available)
+		if tmResp.Code == 27 {
+			return nil, ErrNoCurrentProxy
+		}
 		return nil, fmt.Errorf("tmproxy API error: code=%d, message=%s", tmResp.Code, tmResp.Message)
 	}
 
-	// Parse expired_at timestamp (format: "HH:MM:SS MM/DD/YYYY")
-	expiresAt, err := time.Parse("15:04:05 01/02/2006", tmResp.Data.ExpiredAt)
+	// Parse expired_at timestamp (format: "HH:MM:SS DD/MM/YYYY")
+	expiresAt, err := time.Parse("15:04:05 02/01/2006", tmResp.Data.ExpiredAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse expired_at: %w", err)
 	}
@@ -161,10 +172,16 @@ func (s *TMProxyService) GetNewProxy(apiKey string) (*ProxyInfo, error) {
 		tmResp.Data.Password,
 	)
 
-	// Note: GetNewProxy response doesn't include NextResetAfter and ExpiresAt
-	// These fields should be populated by calling GetCurrentProxy after getting new proxy
+	// Parse expired_at timestamp (format: "HH:MM:SS DD/MM/YYYY")
+	expiresAt, err := time.Parse("15:04:05 02/01/2006", tmResp.Data.ExpiredAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse expired_at: %w", err)
+	}
+
 	return &ProxyInfo{
-		ProxyStr:    proxyStr,
-		ServiceType: "tmproxy",
+		ProxyStr:       proxyStr,
+		ServiceType:    "tmproxy",
+		NextResetAfter: tmResp.Data.NextRequest,
+		ExpiresAt:      expiresAt,
 	}, nil
 }
