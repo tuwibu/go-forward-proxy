@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -77,24 +76,8 @@ func (m *Manager) insertNewProxy(apiKey, serviceType string, minTimeReset int, s
 			}
 			// When GetNewProxy is called, lastResetAt is the current time
 			lastResetAt = now
-		} else if strings.Contains(err.Error(), "Không tìm thấy proxy đang được sử dụng bởi key") {
-			fmt.Println("No current proxy available, calling GetNewProxy")
-			proxyInfo, err = service.GetNewProxy(apiKey)
-			if err != nil {
-				fmt.Println("Failed to get new proxy: %w", err)
-				return nil, fmt.Errorf("failed to get new proxy: %w", err)
-			}
-			// When GetNewProxy is called, lastResetAt is the current time
-			lastResetAt = now
 		} else {
-			// return nil, fmt.Errorf("failed to get current proxy: %w", err)
-			proxyInfo, err = service.GetNewProxy(apiKey)
-			if err != nil {
-				fmt.Println("Failed to get new proxy: %w", err)
-				return nil, fmt.Errorf("failed to get new proxy: %w", err)
-			}
-			// When GetNewProxy is called, lastResetAt is the current time
-			lastResetAt = now
+			return nil, fmt.Errorf("failed to get current proxy: %w", err)
 		}
 	} else {
 		// GetCurrentProxy succeeded, calculate last_reset_at based on NextResetAfter

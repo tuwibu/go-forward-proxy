@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -72,6 +73,10 @@ func (s *KiotProxyService) GetCurrentProxy(apiKey string) (*ProxyInfo, error) {
 	}
 
 	if !kiotResp.Success || kiotResp.Code != 200 {
+		// Check if error message indicates no current proxy (need to call GetNewProxy)
+		if strings.Contains(kiotResp.Message, "Không tìm thấy proxy") {
+			return nil, ErrNoCurrentProxy
+		}
 		return nil, fmt.Errorf("kiotproxy API error: %s", kiotResp.Message)
 	}
 
