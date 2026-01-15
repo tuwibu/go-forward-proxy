@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -68,6 +69,15 @@ func (m *Manager) insertNewProxy(apiKey, serviceType string, minTimeReset int, s
 		fmt.Println("Failed to get current proxy: %w", err)
 		// If GetCurrentProxy returns ErrNoCurrentProxy (code=27), call GetNewProxy to request a new proxy
 		if err.Error() == "no current proxy available, need to call GetNewProxy" || errors.Is(err, proxyservices.ErrNoCurrentProxy) {
+			fmt.Println("No current proxy available, calling GetNewProxy")
+			proxyInfo, err = service.GetNewProxy(apiKey)
+			if err != nil {
+				fmt.Println("Failed to get new proxy: %w", err)
+				return nil, fmt.Errorf("failed to get new proxy: %w", err)
+			}
+			// When GetNewProxy is called, lastResetAt is the current time
+			lastResetAt = now
+		} else if strings.Contains(err.Error(), "Không tìm thấy proxy đang được sử dụng bởi key") {
 			fmt.Println("No current proxy available, calling GetNewProxy")
 			proxyInfo, err = service.GetNewProxy(apiKey)
 			if err != nil {
