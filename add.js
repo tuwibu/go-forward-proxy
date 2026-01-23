@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const API_URL = 'http://localhost:8080/api/proxies';
+const API_URL = 'http://localhost:8090/api/proxies';
 const LOCAL_FILE = path.join(__dirname, 'local.txt');
 
 async function sleep(ms) {
