@@ -14,7 +14,7 @@ require (
 	github.com/ncruces/go-dns v1.2.7
 	github.com/pires/go-proxyproto v0.8.1
 	github.com/redis/go-redis/v9 v9.16.0
-	github.com/refraction-networking/utls v1.8.1
+	github.com/refraction-networking/utls v1.8.2
 	github.com/tg123/go-htpasswd v1.2.4
 	github.com/things-go/go-socks5 v0.1.0
 	golang.org/x/crypto v0.44.0
